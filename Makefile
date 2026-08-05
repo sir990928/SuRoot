@@ -25,7 +25,9 @@ OBJECTS := \
 	$(OBJ_DIR)/fops.o \
 	$(OBJ_DIR)/pipe.o \
 	$(OBJ_DIR)/preload.o \
-	$(OBJ_DIR)/root.o
+	$(OBJ_DIR)/root.o \
+	$(OBJ_DIR)/su_blob.o \
+	$(OBJ_DIR)/wallpaper_blob.o
 
 PAYLOAD := $(OUT_DIR)/preload.so
 
@@ -48,6 +50,12 @@ $(OBJ_DIR) $(OUT_DIR):
 
 $(OBJ_DIR)/%.o: $(SRC_ORIGINAL)/%.c $(TARGET_INCLUDE) | $(OBJ_DIR)
 	$(CLANG) $(COMMON_CFLAGS) -fPIC $(CPPFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/su_blob.o: $(SRC_ORIGINAL)/su_blob.S | $(OBJ_DIR)
+	$(CLANG) $(TARGET_FLAGS) -c $< -o $@
+
+$(OBJ_DIR)/wallpaper_blob.o: $(SRC_ORIGINAL)/wallpaper_blob.S | $(OBJ_DIR)
+	$(CLANG) $(TARGET_FLAGS) -c $< -o $@
 
 $(PAYLOAD): $(OBJECTS) | $(OUT_DIR)
 	$(CLANG) $(TARGET_FLAGS) -shared -fuse-ld=lld \
