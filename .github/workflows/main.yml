@@ -1,4 +1,4 @@
-name: Build CVE Payload AYA1
+name: 构建 CVE Payload AYA1
 
 on:
   push:
@@ -20,27 +20,27 @@ jobs:
       API: "35"
 
     steps:
-      - name: Checkout source
+      - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: 安装构建工具
         run: sudo apt-get update && sudo apt-get install -y make zip
 
-      - name: Install Android NDK
+      - name: 安装 Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r29
 
-      - name: Verify toolchain
+      - name: 验证编译工具链
         shell: bash
         run: |
           set -eu
-          : "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME is not set}"
+          : "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME 未设置}"
           clang_path="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
           test -x "$clang_path"
           "$clang_path" --version
 
-      - name: Build payload and helper
+      - name: 编译 payload 和 helper
         shell: bash
         run: |
           set -eu
@@ -49,22 +49,20 @@ jobs:
           test -s build/v6/artifact/cve-2026-43499-app.so
           test -s build/v6/artifact/cve-2026-43499-root
 
-      - name: Record hashes
+      - name: 记录文件哈希
         shell: bash
         run: |
           set -eu
           sha256sum \
             build/v6/artifact/cve-2026-43499-app.so \
-            build/v6/artifact/cve-2026-43499-root \
-            target/adb/${TARGET_NAME}/target.h \
-            target/app/${TARGET_NAME}/target.h
+            build/v6/artifact/cve-2026-43499-root
 
-      - name: Package build artifacts
+      - name: 打包构建产物
         run: zip -j payload-build.zip build/v6/artifact/*
 
-      - name: Upload build artifacts
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.TARGET_NAME }}-build-zip
+          name: ${{ env.TARGET_NAME }}-构建包
           path: payload-build.zip
           retention-days: 30
