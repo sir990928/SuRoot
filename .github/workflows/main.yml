@@ -26,7 +26,7 @@ jobs:
       - name: 安装构建工具
         run: sudo apt-get update && sudo apt-get install -y make zip
 
-      - name: 安装 Android NDK
+      - name: 安装 Android NDK r29
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r29
@@ -44,8 +44,11 @@ jobs:
         shell: bash
         run: |
           set -eu
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME}"
           export CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
-          make clean all API="$API" TARGET="$TARGET_NAME" CLANG="$CLANG"
+          echo "NDK_HOME=$ANDROID_NDK_HOME"
+          echo "CLANG=$CLANG"
+          make clean all API="$API" TARGET="$TARGET_NAME" CLANG="$CLANG" NDK_ROOT="$ANDROID_NDK_HOME"
           test -s build/v6/artifact/cve-2026-43499-app.so
           test -s build/v6/artifact/cve-2026-43499-root
 
