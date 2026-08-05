@@ -8,9 +8,13 @@ under `build/v6/obj` or `objects-rebuilt` during compilation.
 
 ## Target configuration
 
-The offset table is:
+The ADB offset table is:
 
-`target/pa3q-S9380ZHU1AYA1/target.h`
+`target/adb/pa3q-S9380ZHU1AYA1/target.h`
+
+The APP copy starts at:
+
+`target/app/pa3q-S9380ZHU1AYA1/target.h`
 
 Target table SHA-256:
 
@@ -34,15 +38,12 @@ SYSTEM_UNBOUND_WQ_OFF               0x02149e60
 ROOT_UMH_PATH                       /data/local/tmp/cve-2026-43499-root
 ```
 
-## Source split
+## Source layout
 
-`src/original` contains `main.c`, `util.c`, `fops.c`, `pipe.c`,
-`preload_minimal.c`, and compatibility globals from the restored original
-tree.
-
-`src/device` contains the tracefs `slide.c` and UMH `root.c`. These two files
-were compiled with the device include tree; the object hashes match the V6
-objects saved in `objects`.
+The verified ADB baseline is under `src/adb/`. A matching working copy is
+under `src/app/` for the APP-specific implementation. The Makefile currently
+builds the ADB baseline; APP sources can diverge without changing the tested
+ADB tree. KernelSnitch headers are kept inside each variant directory.
 
 `helper/su_daemon.c` is the helper used both by `--run-payload` and by the
 kernel UMH path. It must be installed at the fixed `ROOT_UMH_PATH`.
@@ -68,8 +69,8 @@ On Linux, WSL, or macOS with an Android NDK clang:
 make CLANG=/path/to/clang
 ```
 
-The Makefile creates intermediate files under `build/v6/obj`; they are not
-needed at runtime and can be removed with `make clean`.
+The Makefile writes only final artifacts under `build/v6/artifact`; object
+files are not required for this build.
 
 The expected payload hash is:
 
@@ -90,7 +91,7 @@ The successful ADB entry used the helper loader, not direct `LD_PRELOAD`:
 PSELECT_ROUTE_ATTEMPTS=1
 PSELECT_DELAY_USEC=10000
 /data/local/tmp/cve-2026-43499-root --run-payload \
-  /data/local/tmp/cve-2026-43499-root-original-zhu-v6.so \
+/data/local/tmp/cve-2026-43499 \
   /data/local/tmp/cve-2026-43499-root \
   /data/local/tmp/zhu-v6.log
 ```

