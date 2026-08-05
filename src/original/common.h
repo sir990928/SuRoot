@@ -455,7 +455,6 @@ int pipe_phys_read_data(int fd, uintptr_t direct_addr, void *out, size_t len);
 int pipe_phys_write_data(
     int fd, uintptr_t direct_addr, const void *data, size_t len);
 uint64_t pipe_read64(int fd, uintptr_t direct_addr);
-uint32_t pipe_read32(int fd, uintptr_t direct_addr);
 int pipe_write64(int fd, uintptr_t direct_addr, uint64_t value);
 int install_pipe_physrw(int fd);
 
