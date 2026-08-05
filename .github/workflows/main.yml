@@ -36,14 +36,11 @@ jobs:
           CLANG_PATH="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API }}-clang"
           echo "期望的编译器路径: $CLANG_PATH"
           
-          # 列出可用的aarch64编译器
           echo "可用的aarch64编译器："
           ls ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-* 2>/dev/null || echo "未找到aarch64编译器"
           
-          # 检查编译器是否存在
           if [ ! -x "$CLANG_PATH" ]; then
             echo "错误：编译器不存在！"
-            echo "尝试查找任何aarch64编译器："
             find ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/ -name "*aarch64*clang*" -type f 2>/dev/null || echo "未找到任何aarch64编译器"
             exit 1
           fi
@@ -55,14 +52,14 @@ jobs:
         run: |
           export ANDROID_NDK_HOME
           export CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API }}-clang"
-          make debug API=${{ env.API }} TARGET=${{ env.TARGET_NAME }}
+          make info API=${{ env.API }} PROJECT=${{ env.TARGET_NAME }}
 
       - name: 编译漏洞程序
         run: |
           export ANDROID_NDK_HOME
           export CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API }}-clang"
           echo "使用编译器: $CLANG"
-          make API=${{ env.API }} TARGET=${{ env.TARGET_NAME }} all
+          make API=${{ env.API }} PROJECT=${{ env.TARGET_NAME }} all
 
       - name: 打包编译产物ZIP
         run: zip -r payload-build.zip build/
