@@ -1,80 +1,122 @@
 API ?= 35
-TARGET ?= pa3q-S9380ZHU1AYA1
+PROJECT ?= pa3q-S9380ZHU1AYA1
+OUTDIR ?= build/$(PROJECT)/bin
+EMBEDDIR ?= build/embed
 
-# 设置CLANG编译器，优先使用环境变量，否则使用TARGET_CC
-ifndef CLANG
-    CLANG := $(ANDROID_NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$(API)-clang
+TARGET_DIR := src/targets/$(PROJECT)
+TARGET_HEADER := $(TARGET_DIR)/target.h
+
+ifeq ($(wildcard $(TARGET_HEADER)),)
+$(error unknown PROJECT=$(PROJECT), missing $(TARGET_HEADER))
 endif
 
-ROOT := .
-SRC_ORIGINAL := $(ROOT)/src/original
-SRC_DEVICE := $(ROOT)/src/device
-TARGET_DIR := $(ROOT)/target/$(TARGET)
-INCLUDE_DIR := $(ROOT)/include
-TARGET_INCLUDE := $(INCLUDE_DIR)/targets/$(TARGET)/target.h
-BUILD_DIR := $(ROOT)/build/v6
-OBJ_DIR := $(BUILD_DIR)/obj
-OUT_DIR := $(BUILD_DIR)/artifact
+define pick_src
+$(if $(wildcard $(TARGET_DIR)/$(1)),$(TARGET_DIR)/$(1),src/$(1))
+endef
 
-TARGET_FLAGS := --target=aarch64-linux-android$(API)
-COMMON_CFLAGS := $(TARGET_FLAGS) -O2 -g0 -Wall -Wextra -Wno-unused-parameter
-ORIGINAL_CPPFLAGS := -I$(SRC_ORIGINAL) -I$(INCLUDE_DIR) -I$(TARGET_DIR) -DTARGET_CONFIG_H=\"target.h\"
-DEVICE_CPPFLAGS := -I$(SRC_DEVICE) -I$(INCLUDE_DIR) -I$(TARGET_DIR)
+EMBED_SU := $(EMBEDDIR)/su_daemon_aarch64_pie
+PRELOAD := $(OUTDIR)/preload.so
 
-ORIGINAL_OBJECTS := \
-	$(OBJ_DIR)/main.o \
-	$(OBJ_DIR)/util.o \
-	$(OBJ_DIR)/fops.o \
-	$(OBJ_DIR)/pipe.o \
-	$(OBJ_DIR)/preload_minimal.o \
-	$(OBJ_DIR)/root_compat_globals.o
+CORE_SRCS := \
+  $(call pick_src,main.c) \
+  $(call pick_src,util.c) \
+  $(call pick_src,slide.c) \
+  $(call pick_src,fops.c) \
+  $(call pick_src,pipe.c) \
+  src/root.c
+PRELOAD_SRCS := $(CORE_SRCS) src/preload.c src/su_blob.S
 
-DEVICE_OBJECTS := \
-	$(OBJ_DIR)/root-umh.o \
-	$(OBJ_DIR)/slide-tracefs.o
+.DEFAULT_GOAL := preload
 
-PAYLOAD := $(OUT_DIR)/cve-2026-43499-root-original-zhu-tracefs-v6.so
-HELPER := $(OUT_DIR)/cve-2026-43499-root
+DEFAULT_NDK_ROOT := $(HOME)/android-ndk-cache/android-ndk-r29
+NDK_ROOT ?= $(or $(ANDROID_NDK_HOME),$(ANDROID_NDK_ROOT),$(wildcard $(DEFAULT_NDK_ROOT)))
+NDK_TOOLCHAIN ?= $(if $(NDK_ROOT),$(NDK_ROOT)/toolchains/llvm/prebuilt/linux-x86_64)
+NDK_CC := $(NDK_TOOLCHAIN)/bin/aarch64-linux-android$(API)-clang
+HOST_CLANG ?= clang
+SYSROOT ?= $(if $(NDK_TOOLCHAIN),$(NDK_TOOLCHAIN)/sysroot)
+RESOURCE_DIR ?= $(if $(NDK_TOOLCHAIN),$(NDK_TOOLCHAIN)/lib/clang/21)
 
-.PHONY: all clean hashes debug
+HOST_TARGET_FLAGS := \
+  --target=aarch64-linux-android$(API) \
+  --sysroot=$(SYSROOT) \
+  -resource-dir $(RESOURCE_DIR) \
+  --rtlib=compiler-rt \
+  --unwindlib=none
+HOST_COMMON_LDFLAGS := \
+  -fuse-ld=lld \
+  -Wl,-rpath-link,$(SYSROOT)/usr/lib/aarch64-linux-android/$(API) \
+  -L$(SYSROOT)/usr/lib/aarch64-linux-android/$(API) \
+  -L$(SYSROOT)/usr/lib/aarch64-linux-android
+HOST_PIE_LDFLAGS := \
+  $(HOST_COMMON_LDFLAGS) \
+  -Wl,-dynamic-linker,/system/bin/linker64
 
-all: $(PAYLOAD) $(HELPER)
+ifneq ($(origin CC),default)
+  TARGET_CC := $(CC)
+  TARGET_FLAGS :=
+  TARGET_COMMON_LDFLAGS :=
+  TARGET_PIE_LDFLAGS :=
+else ifneq ($(wildcard $(NDK_CC)),)
+  NDK_CC_WORKS := $(shell $(NDK_CC) --version >/dev/null 2>&1 && echo yes)
+  ifeq ($(NDK_CC_WORKS),yes)
+    TARGET_CC := $(NDK_CC)
+    TARGET_FLAGS :=
+    TARGET_COMMON_LDFLAGS :=
+    TARGET_PIE_LDFLAGS :=
+  else
+    TARGET_CC := $(HOST_CLANG)
+    TARGET_FLAGS := $(HOST_TARGET_FLAGS)
+    TARGET_COMMON_LDFLAGS := $(HOST_COMMON_LDFLAGS)
+    TARGET_PIE_LDFLAGS := $(HOST_PIE_LDFLAGS)
+  endif
+else
+  TARGET_CC := $(HOST_CLANG)
+  TARGET_FLAGS := $(HOST_TARGET_FLAGS)
+  TARGET_COMMON_LDFLAGS := $(HOST_COMMON_LDFLAGS)
+  TARGET_PIE_LDFLAGS := $(HOST_PIE_LDFLAGS)
+endif
 
-# 调试目标，显示变量值
-debug:
-	@echo "API = $(API)"
-	@echo "TARGET = $(TARGET)"
-	@echo "ANDROID_NDK_HOME = $(ANDROID_NDK_HOME)"
-	@echo "CLANG = $(CLANG)"
-	@echo "TARGET_FLAGS = $(TARGET_FLAGS)"
+COMMON_CFLAGS := -O2 -g0 -Wall -Wextra -Isrc
+PIE_CFLAGS := -fPIE -pie $(COMMON_CFLAGS)
+SO_CFLAGS := -fPIC $(COMMON_CFLAGS)
+WARN_CFLAGS := -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function
+TARGET_CFLAGS := -DTARGET_CONFIG_H=\"targets/$(PROJECT)/target.h\"
 
-$(TARGET_INCLUDE): $(TARGET_DIR)/target.h
-	mkdir -p $(@D)
-	cp $< $@
+.PHONY: all preload clean info list-projects
 
-$(OBJ_DIR) $(OUT_DIR):
+all: preload
+
+preload: $(PRELOAD)
+
+$(OUTDIR):
 	mkdir -p $@
 
-$(OBJ_DIR)/%.o: $(SRC_ORIGINAL)/%.c $(TARGET_INCLUDE) | $(OBJ_DIR)
-	$(CLANG) $(COMMON_CFLAGS) -fPIC $(ORIGINAL_CPPFLAGS) -c $< -o $@
+$(EMBEDDIR):
+	mkdir -p $@
 
-$(OBJ_DIR)/root-umh.o: $(SRC_DEVICE)/root.c $(TARGET_INCLUDE) | $(OBJ_DIR)
-	$(CLANG) $(COMMON_CFLAGS) -fPIC $(DEVICE_CPPFLAGS) -c $< -o $@
+$(EMBED_SU): src/su_daemon.c | $(EMBEDDIR)
+	$(TARGET_CC) $(TARGET_FLAGS) $(PIE_CFLAGS) $(TARGET_CFLAGS) \
+	  $< $(TARGET_PIE_LDFLAGS) -o $@
 
-$(OBJ_DIR)/slide-tracefs.o: $(SRC_DEVICE)/slide.c $(TARGET_INCLUDE) | $(OBJ_DIR)
-	$(CLANG) $(COMMON_CFLAGS) -fPIC $(DEVICE_CPPFLAGS) -c $< -o $@
+$(PRELOAD): $(PRELOAD_SRCS) $(EMBED_SU) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
+	$(TARGET_CC) $(TARGET_FLAGS) $(SO_CFLAGS) $(WARN_CFLAGS) $(TARGET_CFLAGS) \
+	  $(PRELOAD_SRCS) $(TARGET_COMMON_LDFLAGS) \
+	  -shared -o $@ -pthread
+	sha256sum $@
 
-$(PAYLOAD): $(ORIGINAL_OBJECTS) $(DEVICE_OBJECTS) | $(OUT_DIR)
-	$(CLANG) $(TARGET_FLAGS) -shared -fuse-ld=lld \
-		-Wl,--no-undefined -Wl,-z,relro -Wl,-z,now \
-		$(ORIGINAL_OBJECTS) $(DEVICE_OBJECTS) -pthread -ldl -o $@
+info:
+	@echo "PROJECT=$(PROJECT)"
+	@echo "TARGET_DIR=$(TARGET_DIR)"
+	@echo "TARGET_CC=$(TARGET_CC)"
+	@echo "TARGET_FLAGS=$(TARGET_FLAGS)"
+	@echo "TARGET_COMMON_LDFLAGS=$(TARGET_COMMON_LDFLAGS)"
+	@echo "TARGET_PIE_LDFLAGS=$(TARGET_PIE_LDFLAGS)"
+	@echo "PRELOAD=$(PRELOAD)"
+	@echo "EMBED_SU=$(EMBED_SU)"
+	@echo "CORE_SRCS=$(CORE_SRCS)"
 
-$(HELPER): $(ROOT)/helper/su_daemon.c | $(OUT_DIR)
-	$(CLANG) $(TARGET_FLAGS) -fPIE -pie -O2 -g0 -Wall -Wextra \
-		$< -ldl -o $@
-
-hashes: all
-	sha256sum $(PAYLOAD) $(HELPER) $(TARGET_DIR)/target.h
+list-projects:
+	@find src/targets -mindepth 2 -maxdepth 2 -name target.h -printf '%h\n' | sed 's#src/targets/##' | sort
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf build
