@@ -52,7 +52,7 @@
 #define MM_ORDER 3
 #define MM_PARTIALS 5
 #define CORE 0
-#define KSNITCH_COLLISIONS 16
+#define KSNITCH_COLLISIONS 4
 
 #define ORDER3_SIZE (PAGE_SIZE << MM_ORDER)
 #define PIPE_CANDIDATE_PAGES 8
@@ -124,7 +124,7 @@
 #define PSELECT_ROUTE_NFDS 320
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
-#define PSELECT_ENTER_DELAY_USEC 5000
+#define PSELECT_ENTER_DELAY_USEC 50000
 #define PSELECT_TIMEOUT_SEC 5
 #ifndef ROUTE_WAIT_SECONDS
 #define ROUTE_WAIT_SECONDS 8
@@ -309,7 +309,6 @@ extern uint64_t slide_bootid_before;
 extern uint64_t slide_bootid_after;
 extern uint64_t slide_bootid_want;
 extern ssize_t slide_bootid_restore_ret;
-extern uintptr_t slide_p0_offset;
 extern uint64_t current_task_addr;
 extern uint64_t current_cred_addr;
 extern uint64_t current_real_cred_addr;
