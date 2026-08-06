@@ -1,5 +1,4 @@
 name: 构建 CVE Payload AYA1
-
 on:
   push:
     branches:
@@ -10,6 +9,7 @@ on:
       - "src/**"
       - "target/**"
       - "helper/**"
+      - "include/**"
   workflow_dispatch:
 
 jobs:
@@ -18,54 +18,86 @@ jobs:
     env:
       TARGET_NAME: pa3q-S9380ZHU1AYA1
       API: "35"
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/29.0.12904245
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: 安装构建工具
-        run: sudo apt-get update && sudo apt-get install -y make zip
+      - name: 安装基础工具
+        run: sudo apt update && sudo apt install -y make zip unzip wget
 
-      - name: 安装 Android NDK r29
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r29
+      - name: 清理预装安卓SDK
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo mkdir -p /usr/local/lib/android/sdk
+          sudo chown -R $USER:$USER /usr/local/lib/android
 
-      - name: 验证编译工具链
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 下载并安装 NDK r29
+        run: |
+          set -eu
+          echo "下载 NDK r29..."
+          wget -q --show-progress --timeout=60 --tries=5 \
+            "https://dl.google.com/android/repository/android-ndk-r29-linux.zip" \
+            -O android-ndk.zip
+          
+          echo "解压 NDK..."
+          unzip -q android-ndk.zip
+          
+          mkdir -p /usr/local/lib/android/sdk/ndk
+          mv android-ndk-r29 /usr/local/lib/android/sdk/ndk/29.0.12904245
+          rm android-ndk.zip
+          
+          echo "NDK r29 安装完成"
+
+      - name: 验证 NDK
         shell: bash
         run: |
           set -eu
-          : "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME 未设置}"
-          clang_path="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
-          test -x "$clang_path"
-          "$clang_path" --version
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          test -d "$ANDROID_NDK_HOME"
+          CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
+          test -x "$CLANG"
+          "$CLANG" --version
+          cat "$ANDROID_NDK_HOME/source.properties"
 
-      - name: 编译 payload 和 helper
+      - name: 校验target头文件路径
         shell: bash
         run: |
           set -eu
-          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME}"
+          TARGET_HEADER="target/${TARGET_NAME}/target.h"
+          test -f "$TARGET_HEADER"
+          echo "OK: $TARGET_HEADER"
+
+      - name: 编译Payload
+        shell: bash
+        run: |
+          set -eu
           export CLANG="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${API}-clang"
-          echo "NDK_HOME=$ANDROID_NDK_HOME"
-          echo "CLANG=$CLANG"
-          make clean all API="$API" TARGET="$TARGET_NAME" CLANG="$CLANG" NDK_ROOT="$ANDROID_NDK_HOME"
+          echo "使用编译器: $CLANG"
+          make clean all \
+            API="${API}" \
+            TARGET="${TARGET_NAME}" \
+            CLANG="${CLANG}" \
+            NDK_ROOT="${ANDROID_NDK_HOME}"
+          
           test -s build/v6/artifact/cve-2026-43499-app.so
           test -s build/v6/artifact/cve-2026-43499-root
+          ls -lh build/v6/artifact/
 
-      - name: 记录文件哈希
-        shell: bash
-        run: |
-          set -eu
-          sha256sum \
-            build/v6/artifact/cve-2026-43499-app.so \
-            build/v6/artifact/cve-2026-43499-root
+      - name: 输出哈希
+        run: sha256sum build/v6/artifact/*
 
-      - name: 打包构建产物
-        run: zip -j payload-build.zip build/v6/artifact/*
+      - name: 打包
+        run: zip -j payload-build.zip build/v6/artifact/cve-2026-43499-app.so build/v6/artifact/cve-2026-43499-root
 
-      - name: 上传构建产物
+      - name: 上传制品
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.TARGET_NAME }}-构建包
+          name: ${{ env.TARGET_NAME }}-r29-build
           path: payload-build.zip
           retention-days: 30
